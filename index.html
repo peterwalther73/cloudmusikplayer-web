@@ -27,6 +27,7 @@ button:hover{background:var(--sel)}button:focus-visible,.row:focus-visible,input
 #np{position:fixed;inset:0;z-index:5;background:#000;display:none}
 #np.on{display:block}
 #vis{position:absolute;inset:0;width:100%;height:100%}
+#glc{position:absolute;inset:0;width:100%;height:100%;display:none}
 #npui{position:absolute;left:0;right:0;bottom:0;padding:24px 40px 30px;background:linear-gradient(transparent,rgba(0,0,0,.75));transition:opacity .6s}
 #npui.hide{opacity:0}
 #npcover{position:absolute;left:40px;top:40px;width:min(12vw,130px);aspect-ratio:1;border-radius:16px;object-fit:cover;box-shadow:0 10px 40px #000a;transition:opacity .6s}
@@ -59,6 +60,7 @@ button:hover{background:var(--sel)}button:focus-visible,.row:focus-visible,input
 </div>
 <div id="np">
   <canvas id="vis"></canvas>
+  <canvas id="glc"></canvas>
   <img id="npcover" alt="">
   <div id="npui">
     <div id="npt"></div><div id="nps"></div>
@@ -372,9 +374,83 @@ function getWave(){
   return out;
 }
 function avg(l,a,b){let s=0;for(let i=a;i<b;i++)s+=l[i];return s/(b-a)}
+
+/* ---------- WebGL-Stile (Oelfilm, Kaleidoskop, Tunnel) ---------- */
+const glc=$('glc');let gl=null,glU={},glOk=null;
+const VS='attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+const FS=`#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 uRes;uniform float uT,uBass,uLvl,uHigh,uHue,uMode;
+vec3 pal(float t){return .5+.5*cos(6.28318*(t+vec3(0.,.33,.67)+uHue));}
+vec2 warp(vec2 p,float t,float amp){
+  for(int i=0;i<4;i++){float fi=float(i);
+    p+=amp*vec2(sin(p.y*1.7+t*(1.+fi*.37)+fi*1.3),cos(p.x*1.5-t*(1.1+fi*.29)+fi*2.1));
+    p=mat2(.8,.6,-.6,.8)*p;
+  }
+  return p;
+}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*uRes)/min(uRes.x,uRes.y);
+  float t=uT*.12;float amp=.55+uBass*.45+uHigh*.2;
+  vec3 col;
+  if(uMode<.5){
+    vec2 p=warp(uv*2.2,t,amp);
+    float v=sin(p.x*1.3)+sin(p.y*1.1)+sin(length(p)*1.6-t);
+    float band=smoothstep(.38,.5,abs(fract(v*.7)-.5));
+    col=pal(v*.18+t*.05)*(.5+.3*sin(v*1.7))+pal(v*.18+.5)*band*.3;
+    col*=1.15-smoothstep(.6,1.5,length(uv))*.5;
+  }else if(uMode<1.5){
+    float r=length(uv),a=atan(uv.y,uv.x)+t*.25;
+    float seg=6.28318/8.;a=abs(mod(a,seg)-seg*.5);
+    vec2 q=r*vec2(cos(a),sin(a))*3.4;
+    q=warp(q,t,amp*.9);
+    float v=sin(q.x*1.4)+sin(q.y*1.2)+sin(length(q)*1.5-t*1.3);
+    col=pal(v*.2+r*.4+t*.05)*(.5+.35*sin(v*2.));
+    col*=1.15-smoothstep(.6,1.4,r)*.65;
+  }else{
+    float r=length(uv)+.0001,a=atan(uv.y,uv.x);
+    float z=1./(r+.18)+t*3.;
+    float w=sin(a*3.+z*1.3+sin(z*.8+t*2.)*2.)*.5+.5;
+    float w2=sin(a*5.-z*.9+t)*.5+.5;
+    col=pal(z*.12+w*.25)*(.25+.55*w*w2+.25*w);
+    col*=smoothstep(.0,.35,r);
+  }
+  col*=.8+uLvl*.5;
+  gl_FragColor=vec4(col,1.);
+}`;
+function initGL(){
+  if(glOk!==null)return glOk;
+  try{
+    gl=glc.getContext('webgl',{antialias:false,alpha:false})||glc.getContext('experimental-webgl');
+    if(!gl)throw 0;
+    const mk=(t,src)=>{const sh=gl.createShader(t);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh));return sh};
+    const pr=gl.createProgram();gl.attachShader(pr,mk(gl.VERTEX_SHADER,VS));gl.attachShader(pr,mk(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);
+    if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw new Error('link');
+    gl.useProgram(pr);
+    const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+    const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+    for(const n of ['uRes','uT','uBass','uLvl','uHigh','uHue','uMode'])glU[n]=gl.getUniformLocation(pr,n);
+    glOk=true;
+  }catch(e){glOk=false}
+  return glOk;
+}
+function drawGL(){
+  if(!initGL())return;
+  const w=Math.max(2,Math.round(innerWidth*.5)),h=Math.max(2,Math.round(innerHeight*.5));
+  if(glc.width!==w||glc.height!==h){glc.width=w;glc.height=h}
+  gl.viewport(0,0,w,h);
+  gl.uniform2f(glU.uRes,w,h);gl.uniform1f(glU.uT,tphase);gl.uniform1f(glU.uBass,sB);gl.uniform1f(glU.uLvl,sL);gl.uniform1f(glU.uHigh,sH);
+  gl.uniform1f(glU.uHue,hue/360);gl.uniform1f(glU.uMode,mode-GLM[0]);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+function layers(){const on=GLM.indexOf(mode)>=0;cv.style.display=on?'none':'block';glc.style.display=on?'block':'none'}
 function bass(l){let s=0;for(let i=0;i<6;i++)s+=l[i];return s/6}
 let lastBass=0;
-const FADE=[.2,.2,.3,.45,.5,.45,.4,.5,.55,.05,.22];
+const FADE=[.2,.2,.3,.45,.5,.45,.4,.5,.55,.05,.22,1,1,1,.1];
+const GLM=[11,12,13];
 let stars=null,sparks=[],silk=null,sB=0,sM=0,sH=0,sL=0;
 function frame(){
   if(!$('np').classList.contains('on')){return}
@@ -382,6 +458,7 @@ function frame(){
   tphase+=.016;hue=(hue+.05)%360;
   const W=cv.width,H=cv.height,cx=W/2,cy=H/2,l=levels(),b=bass(l);
   sB+=(b-sB)*.03;sM+=(avg(l,8,24)-sM)*.03;sH+=(avg(l,30,60)-sH)*.03;sL+=(avg(l,0,64)-sL)*.03;
+  if(GLM.indexOf(mode)>=0){drawGL();lastBass=b;return}
   g.globalCompositeOperation='source-over';
   g.fillStyle='rgba(0,0,0,'+FADE[mode]+')';g.fillRect(0,0,W,H);
   g.globalCompositeOperation='lighter';
@@ -487,7 +564,7 @@ function frame(){
     }
     const al=.26+sL*.5;g.lineWidth=Math.max(1.3,W/700);g.lineCap='round';
     for(let k=0;k<3;k++){g.strokeStyle=`hsla(${(hue+(k-1)*45+360)%360},80%,${58+sL*20}%,${al})`;g.stroke(paths[k])}
-  }else{
+  }else if(mode===10){
     // Aurora: weiche, wehende Lichtvorhaenge
     const t=tphase,step=10;
     for(let j=0;j<5;j++){
@@ -510,17 +587,33 @@ function frame(){
       }
     }
     g.globalAlpha=1;
+  }else{
+    // Rosetten: duenne, langsam morphende Spirograph-Kurven
+    const t=tphase,sz=Math.min(W,H)*.36;
+    g.lineWidth=Math.max(1.4,W/900);
+    for(let k=0;k<4;k++){
+      const rr=.28+.1*Math.sin(t*.045+k*1.7),d=.55+.3*Math.sin(t*.06+k*2.3)+sB*.5,ro=1-rr,ratio=ro/rr,rot=t*.04*(k%2?1:-1);
+      g.beginPath();
+      const M=900,span=Math.PI*2*6;
+      for(let i=0;i<=M;i++){
+        const a=i/M*span;
+        let x=ro*Math.cos(a)+d*rr*Math.cos(ratio*a),y=ro*Math.sin(a)-d*rr*Math.sin(ratio*a);
+        const c=Math.cos(rot),sn=Math.sin(rot),xr=x*c-y*sn,yr=x*sn+y*c,sc=sz/(1+d*rr);
+        i?g.lineTo(cx+xr*sc,cy+yr*sc):g.moveTo(cx+xr*sc,cy+yr*sc);
+      }
+      g.strokeStyle=`hsla(${(hue+k*32)%360},80%,${60+sL*20}%,${.22+sL*.25})`;g.stroke();
+    }
   }
   lastBass=b;
 }
-const names=['Stil 1 · Ring','Stil 2 · Wellen','Stil 3 · Nebel','Stil 4 · Sternenflug','Stil 5 · Balken','Stil 6 · Oszilloskop','Stil 7 · Kreis-Balken','Stil 8 · Lichtgitter','Stil 9 · Funken','Stil 10 · Seide','Stil 11 · Aurora'];
+const names=['Stil 1 · Ring','Stil 2 · Wellen','Stil 3 · Nebel','Stil 4 · Sternenflug','Stil 5 · Balken','Stil 6 · Oszilloskop','Stil 7 · Kreis-Balken','Stil 8 · Lichtgitter','Stil 9 · Funken','Stil 10 · Seide','Stil 11 · Aurora','Stil 12 · Ölfilm','Stil 13 · Kaleidoskop','Stil 14 · Tunnel','Stil 15 · Rosetten'];
 if(!(mode>=0&&mode<names.length))mode=0;
-function syncMode(){$('nMode').textContent=names[mode]}
-$('nMode').onclick=()=>{mode=(mode+1)%names.length;ls.set('vmode',String(mode));syncMode();g.clearRect(0,0,cv.width,cv.height)};
+function syncMode(){$('nMode').textContent=names[mode];layers()}
+$('nMode').onclick=()=>{do{mode=(mode+1)%names.length}while(GLM.indexOf(mode)>=0&&!initGL());ls.set('vmode',String(mode));syncMode();g.clearRect(0,0,cv.width,cv.height)};
 let hideT=0;
 function pokeUi(){$('npui').classList.remove('hide');clearTimeout(hideT);hideT=setTimeout(()=>{if(!au.paused)$('npui').classList.add('hide')},6000)}
 ['mousemove','keydown','click','touchstart'].forEach(e=>$('np').addEventListener(e,pokeUi));
-function openNp(){setupAudio();if(actx&&actx.state==='suspended')actx.resume();$('np').classList.add('on');syncMode();pokeUi();g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height);requestAnimationFrame(frame);$('nPlay').focus()}
+function openNp(){setupAudio();if(GLM.indexOf(mode)>=0&&!initGL())mode=0;if(actx&&actx.state==='suspended')actx.resume();$('np').classList.add('on');syncMode();pokeUi();g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height);requestAnimationFrame(frame);$('nPlay').focus()}
 function closeNp(){$('np').classList.remove('on');if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
 $('bVis').onclick=$('barText').onclick=openNp;$('nBack').onclick=closeNp;
 $('barText').onkeydown=e=>{if(e.key==='Enter')openNp()};
