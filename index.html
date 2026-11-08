@@ -377,7 +377,7 @@ function setupAudio(){
   if(actx||!useCors)return;
   try{
     actx=new (window.AudioContext||window.webkitAudioContext)();
-    an=actx.createAnalyser();an.fftSize=1024;an.smoothingTimeConstant=.4;
+    an=actx.createAnalyser();an.fftSize=1024;an.smoothingTimeConstant=.6;
     for(const el of aud)actx.createMediaElementSource(el).connect(an);
     an.connect(actx.destination);
     freq=new Uint8Array(an.frequencyBinCount);wave=new Uint8Array(an.fftSize);analyserOk=true;
@@ -553,19 +553,19 @@ function updSpec(l){
   // schnell hoch, sanft runter; Lautstaerke wird automatisch ausgeglichen
   let mxr=0;
   for(let i=0;i<64;i++){
-    const t=l[i]*act;smv[i]+=(t-smv[i])*(t>smv[i]?.85:.14);
+    const t=l[i]*act;smv[i]+=(t-smv[i])*(t>smv[i]?.5:.09);
     const r=smv[i]*(.8+2*Math.pow(i/63,.8));raw2[i]=r;if(r>mxr)mxr=r;
   }
   agc+=(mxr-agc)*(mxr>agc?.15:.004);
   const d=Math.max(.2,agc);
   for(let i=0;i<64;i++)spec[i]=Math.min(1,raw2[i]/d*.95);
-  sLow+=(avg(spec,0,8)-sLow)*.5;sMid+=(avg(spec,8,28)-sMid)*.5;sHigh+=(avg(spec,28,64)-sHigh)*.5;
+  sLow+=(avg(spec,0,8)-sLow)*.28;sMid+=(avg(spec,8,28)-sMid)*.28;sHigh+=(avg(spec,28,64)-sHigh)*.28;
   // Schlag-Erkenner: Bass springt ueber seinen Durchschnitt
   let fx=0;for(let i=0;i<10;i++){const d=l[i]*act-lPrev[i];if(d>0)fx+=d;lPrev[i]=l[i]*act}
   bAvg+=(fx-bAvg)*.05;lastFx=fx;
   const nw=performance.now();
-  if(fx>bAvg*2.1+.08&&nw-lastBeat>260){beat=1;lastBeat=nw}
-  beat*=.9;
+  if(fx>bAvg*2.1+.08&&nw-lastBeat>260){beat=.6;lastBeat=nw}
+  beat*=.94;
 }
 function sp(x){const f=Math.max(0,Math.min(1,x))*63,i=f|0,j=Math.min(63,i+1);return spec[i]+(spec[j]-spec[i])*(f-i)}
 function frame(){
