@@ -210,8 +210,16 @@ function playFolder(folder,start){
 const urlCache=new Map();
 async function dlUrl(id){
   const c=urlCache.get(id);if(c&&Date.now()<c.e)return c.u;
-  const j=await gj(`/me/drive/items/${encodeURIComponent(id)}?$select=id,@microsoft.graph.downloadUrl`);
-  const u=j['@microsoft.graph.downloadUrl'];if(!u)throw new Error('Keine Download-Adresse');
+  let u='';
+  try{const j=await gj(`/me/drive/items/${encodeURIComponent(id)}`);u=j['@microsoft.graph.downloadUrl']||j['@content.downloadUrl']||''}catch(e){}
+  if(!u){
+    // zweiter Weg: /content leitet auf die fertige Adresse um
+    const tk=await token();
+    const r=await fetch(`${GRAPH}/me/drive/items/${encodeURIComponent(id)}/content`,{headers:{Authorization:'Bearer '+tk}});
+    if(r.ok&&r.url&&!r.url.startsWith(GRAPH))u=r.url;
+    try{r.body&&r.body.cancel()}catch(e){}
+  }
+  if(!u)throw new Error('Keine Download-Adresse');
   urlCache.set(id,{u,e:Date.now()+20*60*1000});return u;
 }
 let useCors=true,playToken=0;
