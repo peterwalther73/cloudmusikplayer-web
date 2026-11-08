@@ -371,15 +371,17 @@ function getWave(){
   for(let i=0;i<n;i++)out[i]=on*(.5*Math.sin(i*.09+tphase*3)+.25*Math.sin(i*.23-tphase*2));
   return out;
 }
+function avg(l,a,b){let s=0;for(let i=a;i<b;i++)s+=l[i];return s/(b-a)}
 function bass(l){let s=0;for(let i=0;i<6;i++)s+=l[i];return s/6}
 let lastBass=0;
-const FADE=[.2,.2,.3,.45,.5,.45,.4,.5,.55];
-let stars=null,sparks=[];
+const FADE=[.2,.2,.3,.45,.5,.45,.4,.5,.55,.05,.22];
+let stars=null,sparks=[],silk=null,sB=0,sM=0,sH=0,sL=0;
 function frame(){
   if(!$('np').classList.contains('on')){return}
   requestAnimationFrame(frame);
   tphase+=.016;hue=(hue+.05)%360;
   const W=cv.width,H=cv.height,cx=W/2,cy=H/2,l=levels(),b=bass(l);
+  sB+=(b-sB)*.03;sM+=(avg(l,8,24)-sM)*.03;sH+=(avg(l,30,60)-sH)*.03;sL+=(avg(l,0,64)-sL)*.03;
   g.globalCompositeOperation='source-over';
   g.fillStyle='rgba(0,0,0,'+FADE[mode]+')';g.fillRect(0,0,W,H);
   g.globalCompositeOperation='lighter';
@@ -461,7 +463,7 @@ function frame(){
         g.beginPath();g.arc(sx*(c+.5),H*.9-sy*rw,lit?r*1.25:r*.7,0,7);g.fill();
       }
     }
-  }else{
+  }else if(mode===8){
     // Funken
     const n=Math.floor(2+b*14);
     for(let i=0;i<n&&sparks.length<320;i++)sparks.push({x:Math.random()*W,y:H+10,vx:(Math.random()-.5)*1.2,vy:-(1.5+Math.random()*3+b*5),life:1,h:(hue+Math.random()*80)%360});
@@ -470,10 +472,48 @@ function frame(){
       if(p.life<=0||p.y<-10){sparks.splice(i,1);continue}
       g.fillStyle=`hsla(${p.h},95%,${55+b*30}%,${p.life})`;g.beginPath();g.arc(p.x,p.y,Math.max(2,W/420)*(.6+p.life),0,7);g.fill();
     }
+  }else if(mode===9){
+    // Seide: Faeden im langsamen Stroemungsfeld
+    const N=1800,sc=W/1280;
+    if(!silk){silk=[];for(let i=0;i<N;i++)silk.push({x:Math.random()*W,y:Math.random()*H,life:Math.random()*400})}
+    const t=tphase,turb=1+sH*1.2,spd=(.55+sB*1.6+sL*.6)*sc;
+    const paths=[new Path2D(),new Path2D(),new Path2D()];
+    for(let i=0;i<N;i++){
+      const p=silk[i],u=p.x/W*6*turb,v=p.y/H*4*turb;
+      const ang=Math.sin(u*1.1+t*.13+Math.sin(v*.9-t*.07)*1.5)*Math.PI+Math.cos(v*1.3-t*.1+Math.sin(u*.6+t*.05))*1.3;
+      const nx=p.x+Math.cos(ang)*spd,ny=p.y+Math.sin(ang)*spd,pa=paths[i%3];
+      pa.moveTo(p.x,p.y);pa.lineTo(nx,ny);p.x=nx;p.y=ny;
+      if(--p.life<0||nx<-20||nx>W+20||ny<-20||ny>H+20){p.x=Math.random()*W;p.y=Math.random()*H;p.life=150+Math.random()*250}
+    }
+    const al=.26+sL*.5;g.lineWidth=Math.max(1.3,W/700);g.lineCap='round';
+    for(let k=0;k<3;k++){g.strokeStyle=`hsla(${(hue+(k-1)*45+360)%360},80%,${58+sL*20}%,${al})`;g.stroke(paths[k])}
+  }else{
+    // Aurora: weiche, wehende Lichtvorhaenge
+    const t=tphase,step=10;
+    for(let j=0;j<5;j++){
+      const h0=(hue+j*14+360)%360,base=H*(.18+.09*j),hgt=H*(.30+sL*.35+sB*.2);
+      const top=x=>base+Math.sin(x/W*4.2+t*.18*(1+j*.25)+j*2)*H*.09+Math.sin(x/W*9-t*.13+j)*H*.03;
+      const gr=g.createLinearGradient(0,base-H*.1,0,base+hgt+H*.1);
+      gr.addColorStop(0,`hsla(${h0},85%,60%,0)`);gr.addColorStop(.35,`hsla(${h0},75%,52%,.9)`);gr.addColorStop(1,`hsla(${(h0+35)%360},70%,42%,0)`);
+      g.fillStyle=gr;g.globalAlpha=.05+sL*.07;
+      g.beginPath();g.moveTo(0,top(0));
+      for(let x=0;x<=W;x+=step)g.lineTo(x,top(x));
+      for(let x=W;x>=0;x-=step)g.lineTo(x,top(x)+hgt*(.8+.2*Math.sin(x/W*6+t*.2+j)));
+      g.closePath();g.fill();
+      // senkrechte Strahlen im Vorhang
+      g.globalAlpha=1;g.lineWidth=step*.9;
+      for(let x=0;x<=W;x+=step*2){
+        const a=Math.max(0,.012*Math.sin(x*.021+t*.35+j*1.7)*Math.sin(x*.007-t*.2));
+        if(a<.002)continue;
+        const y0=top(x);g.strokeStyle=`hsla(${h0},70%,60%,${a*(1+sL)})`;
+        g.beginPath();g.moveTo(x,y0);g.lineTo(x,y0+hgt*.8);g.stroke();
+      }
+    }
+    g.globalAlpha=1;
   }
   lastBass=b;
 }
-const names=['Stil 1 · Ring','Stil 2 · Wellen','Stil 3 · Nebel','Stil 4 · Sternenflug','Stil 5 · Balken','Stil 6 · Oszilloskop','Stil 7 · Kreis-Balken','Stil 8 · Lichtgitter','Stil 9 · Funken'];
+const names=['Stil 1 · Ring','Stil 2 · Wellen','Stil 3 · Nebel','Stil 4 · Sternenflug','Stil 5 · Balken','Stil 6 · Oszilloskop','Stil 7 · Kreis-Balken','Stil 8 · Lichtgitter','Stil 9 · Funken','Stil 10 · Seide','Stil 11 · Aurora'];
 if(!(mode>=0&&mode<names.length))mode=0;
 function syncMode(){$('nMode').textContent=names[mode]}
 $('nMode').onclick=()=>{mode=(mode+1)%names.length;ls.set('vmode',String(mode));syncMode();g.clearRect(0,0,cv.width,cv.height)};
