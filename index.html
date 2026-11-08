@@ -416,7 +416,8 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform vec2 uRes;uniform float uT,uF,uTone,uPitch,uLvl,uHue,uMode;
+uniform vec2 uRes;uniform float uT,uF,uTone,uPitch,uLvl,uHue,uMode,uLow,uMid,uHigh;uniform sampler2D uSpec;
+float sp(float x){return texture2D(uSpec,vec2(clamp(x,0.,1.),.5)).r;}
 vec3 pal(float t){return .5+.5*cos(6.28318*(t+vec3(0.,.33,.67)+uHue));}
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
@@ -430,35 +431,35 @@ vec2 warp(vec2 p,float t,float amp){
 }
 void main(){
   vec2 uv=(gl_FragCoord.xy-.5*uRes)/min(uRes.x,uRes.y);
-  float t=uT*.12;float amp=.5+uTone*.6;
+  float t=uT*.12;float amp=.45+uLow*.5+uMid*.3;
   vec3 col=vec3(0.);
   if(uMode<.5){
     vec2 p=warp(uv*2.2,t,amp);
     float v=sin(p.x*1.3)+sin(p.y*1.1)+sin(length(p)*1.6-t);
     float band=smoothstep(.38,.5,abs(fract(v*.7)-.5));
-    col=pal(v*.18+t*.05)*(.5+.3*sin(v*1.7))+pal(v*.18+.5)*band*.3;
+    col=pal(v*.18+t*.05)*(.35+.3*sin(v*1.7)+.5*uMid)+pal(v*.18+.5)*band*(.1+uHigh*1.1);
     col*=1.15-smoothstep(.6,1.5,length(uv))*.5;
   }else if(uMode<1.5){
     float r=length(uv),a=atan(uv.y,uv.x)+t*.25;
     float seg=6.28318/8.;a=abs(mod(a,seg)-seg*.5);
-    vec2 q=r*vec2(cos(a),sin(a))*3.4;
+    vec2 q=r*vec2(cos(a),sin(a))*3.4*(1.-.18*uLow);
     q=warp(q,t,amp*.9);
     float v=sin(q.x*1.4)+sin(q.y*1.2)+sin(length(q)*1.5-t*1.3);
     col=pal(v*.2+r*.4+t*.05)*(.5+.35*sin(v*2.));
-    col*=1.0-smoothstep(.30,.46,r);
+    col*=(.5+1.3*sp(r/.46))*(1.0-smoothstep(.30,.46,r));
   }else if(uMode<2.5){
     float r=length(uv)+.0001,a=atan(uv.y,uv.x);
     float z=1./(r+.18)+t*3.;
     float w=sin(a*3.+z*1.3+sin(z*.8+t*2.)*2.)*.5+.5;
     float w2=sin(a*5.-z*.9+t)*.5+.5;
     col=pal(z*.12+w*.25)*(.25+.55*w*w2+.25*w);
-    col*=smoothstep(.0,.35,r);
+    col*=(.45+1.3*sp(abs(a)/3.14159))*smoothstep(.0,.35,r);
   }else if(uMode<3.5){
     // Lavalampe: weiche Farbblasen
     float tl=uT*.12,f=0.;
     for(int i=0;i<6;i++){float fi=float(i);
       vec2 c=vec2(sin(tl*(.9+fi*.23)+fi*2.1)*.6+(uPitch-.5)*.7,cos(tl*(.8+fi*.19)+fi*1.3)*.36);
-      float r=.11+.04*sin(tl*.7+fi*1.7)+uTone*.05;
+      float r=.09+.03*sin(tl*.7+fi*1.7)+.1*sp((fi+.5)/6.);
       vec2 d=uv-c;f+=r*r/(dot(d,d)+.0001);
     }
     float shape=smoothstep(.9,1.05,f),glow=smoothstep(.25,.9,f);
@@ -466,9 +467,9 @@ void main(){
     col=pal(fc*.12+uv.y*.35+tl*.15)*(.55+.45*shape)*shape*1.1+pal(fc*.1+.5)*glow*(1.-shape)*.35+pal(uv.y*.2+tl*.1)*.05;
   }else if(uMode<4.5){
     // Fraktal: langsam wandernde Julia-Menge
-    float a=uT*.05+1.1+uTone*.5+uPitch*.35;
+    float a=uT*.05+1.1+uLow*.6+uMid*.4;
     vec2 c=.76*vec2(cos(a),sin(a));
-    float ra=t*.3;vec2 z=mat2(cos(ra),-sin(ra),sin(ra),cos(ra))*(uv*2.2);
+    float ra=t*.3;vec2 z=mat2(cos(ra),-sin(ra),sin(ra),cos(ra))*(uv*2.2*(1.-.15*uHigh));
     float n=0.;
     for(int i=0;i<56;i++){if(dot(z,z)>64.)break;z=vec2(z.x*z.x-z.y*z.y,2.*z.x*z.y)+c;n+=1.;}
     float sm=n-log2(max(log2(max(dot(z,z),1.0001)),1e-3))+4.;
@@ -477,20 +478,20 @@ void main(){
   }else if(uMode<5.5){
     // Moire: zwei wandernde Ringmuster
     vec2 c1=vec2(sin(t*2.1),cos(t*1.7))*.3,c2=vec2(cos(t*1.9+1.),sin(t*2.3))*.3;
-    float d1=length(uv-c1),d2=length(uv-c2),fr=46.+uTone*18.;
-    float m=sin(d1*fr-t*4.)*sin(d2*fr+t*3.);
-    col=pal(d1*.5+d2*.5+t*.2)*(.12+.88*smoothstep(-.1,.5,m));
+    float d1=length(uv-c1),d2=length(uv-c2),fr=46.+uLow*22.;
+    float m=sin(d1*fr-t*4.+uMid*3.)*sin(d2*fr+t*3.);
+    col=pal(d1*.5+d2*.5+t*.2)*(.12+.88*smoothstep(-.1,.5,m))*(.55+.9*uHigh+.4*uMid);
   }else if(uMode<6.5){
     // Wasserlicht: Lichtnetze wie auf dem Poolgrund
-    float t2=uT*.06+23.;vec2 p=mod(uv*(8.4+uTone*2.4)+3.14,6.28318)-250.,i2=p;float c=1.,inten=.005;
+    float t2=uT*.06+23.;vec2 p=mod(uv*(8.4+uLow*2.8)+3.14,6.28318)-250.,i2=p;float c=1.,inten=.005;
     for(int n=0;n<4;n++){float tt=t2*(1.-(3.5/float(n+1)));
       i2=p+vec2(cos(tt-i2.x)+sin(tt+i2.y),sin(tt-i2.y)+cos(tt+i2.x));
       c+=1./length(vec2(p.x/(sin(i2.x+tt)/inten),p.y/(cos(i2.y+tt)/inten)));}
-    c/=4.;c=1.17-pow(c,1.4);float w=pow(abs(c),8.);
+    c/=4.;c=1.17-pow(c,1.4);float w=pow(abs(c),8.)*(.5+1.4*uMid+.6*uLow);
     col=pal(.55+t*.1)*.10+pal(.6+t*.1+w*.3)*clamp(w*1.4,0.,1.)*.9+vec3(w*.15);
   }else{
     // Kamin: ruhige Flammen mit Glut
-    float x=uv.x/.9,y=uv.y+.5,hgt=.5+uTone*.14+.04*sin(uF*.7);
+    float x=uv.x/.9,y=uv.y+.5,hgt=.22+.55*sp((x+1.)*.5)+.03*sin(uF*.7);
     float n=fbm(vec2(x*2.4+uPitch*.8,y*1.5-uF*.8)),n2=fbm(vec2(x*5.+uF*.15,y*3.2-uF*1.5));
     float f=n*.7+n2*.3;
     float env=1.-pow(abs(x)/(.95-.45*y/hgt),2.);
@@ -512,9 +513,10 @@ function initGL(){
     const pr=gl.createProgram();gl.attachShader(pr,mk(gl.VERTEX_SHADER,VS));gl.attachShader(pr,mk(gl.FRAGMENT_SHADER,FS));gl.linkProgram(pr);
     if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw new Error('link');
     gl.useProgram(pr);
+    const tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
     const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
-    for(const n of ['uRes','uT','uF','uTone','uPitch','uLvl','uHue','uMode'])glU[n]=gl.getUniformLocation(pr,n);
+    for(const n of ['uRes','uT','uF','uTone','uPitch','uLvl','uHue','uMode','uLow','uMid','uHigh','uSpec'])glU[n]=gl.getUniformLocation(pr,n);
     glOk=true;
   }catch(e){glOk=false}
   return glOk;
@@ -524,7 +526,8 @@ function drawGL(){
   const w=Math.max(2,Math.round(innerWidth*.75)),h=Math.max(2,Math.round(innerHeight*.75));
   if(glc.width!==w||glc.height!==h){glc.width=w;glc.height=h}
   gl.viewport(0,0,w,h);
-  gl.uniform2f(glU.uRes,w,h);gl.uniform1f(glU.uT,tphase);gl.uniform1f(glU.uF,fireT);gl.uniform1f(glU.uTone,toneC);gl.uniform1f(glU.uPitch,toneP);gl.uniform1f(glU.uLvl,sL);
+  gl.uniform2f(glU.uRes,w,h);gl.uniform1f(glU.uT,tphase);gl.uniform1f(glU.uF,fireT);gl.uniform1f(glU.uTone,toneC);gl.uniform1f(glU.uPitch,toneP);gl.uniform1f(glU.uLvl,sL);gl.uniform1f(glU.uLow,sLow);gl.uniform1f(glU.uMid,sMid);gl.uniform1f(glU.uHigh,sHigh);gl.uniform1i(glU.uSpec,0);
+  {const u8=new Uint8Array(64);for(let q=0;q<64;q++)u8[q]=Math.round(spec[q]*255);gl.texImage2D(gl.TEXTURE_2D,0,gl.LUMINANCE,64,1,0,gl.LUMINANCE,gl.UNSIGNED_BYTE,u8)}
   gl.uniform1f(glU.uHue,hue/360);gl.uniform1f(glU.uMode,STY[mode].gl);
   gl.drawArrays(gl.TRIANGLES,0,3);
 }
@@ -535,14 +538,23 @@ const STY=[{k:'cover',n:'Nur Cover'},{k:'ring',n:'Ring',f:.2},{k:'nebel',n:'Nebe
 const isGL=()=>STY[mode].gl!==undefined;
 let spStar=.0003;
 let stars=null,sparks=[],silk=null,sB=0,sM=0,sH=0,sL=0;
+const smv=new Float32Array(64),spec=new Float32Array(64);let sLow=0,sMid=0,sHigh=0;
+function updSpec(l){
+  for(let i=0;i<64;i++){
+    const t=l[i]*act;smv[i]+=(t-smv[i])*(t>smv[i]?.3:.1);
+    spec[i]=Math.min(1,smv[i]*1.4*(.8+2*Math.pow(i/63,.8)));
+  }
+  sLow+=(avg(spec,0,8)-sLow)*.25;sMid+=(avg(spec,8,28)-sMid)*.25;sHigh+=(avg(spec,28,64)-sHigh)*.25;
+}
+function sp(x){const f=Math.max(0,Math.min(1,x))*63,i=f|0,j=Math.min(63,i+1);return spec[i]+(spec[j]-spec[i])*(f-i)}
 function frame(){
   if(!$('np').classList.contains('on')){return}
   requestAnimationFrame(frame);
   act+=((au.paused?0:1)-act)*.02;const tempo=.04+.96*act;
   tphase+=.016*tempo;fireT+=.016*(.3+.7*act);hue0=(hue0+.05*tempo)%360;
-  const W=cv.width,H=cv.height,cx=W/2,cy=H/2,l=levels(),b=bass(l);
+  const W=cv.width,H=cv.height,cx=W/2,cy=H/2,l=levels();updSpec(l);const b=avg(spec,0,6);
   sB+=(b-sB)*.03;sM+=(avg(l,8,24)-sM)*.03;sH+=(avg(l,30,60)-sH)*.03;sL+=(avg(l,0,64)-sL)*.03;
-  {let sw=0,sc2=0,pk=0,pi=2;for(let i=0;i<64;i++){sw+=l[i];sc2+=i*l[i];if(i>=2&&i<52&&l[i]>pk){pk=l[i];pi=i}}
+  {let sw=0,sc2=0,pk=0,pi=2;for(let i=0;i<64;i++){sw+=spec[i];sc2+=i*spec[i];if(i>=2&&i<52&&spec[i]>pk){pk=spec[i];pi=i}}
    toneC+=((sw>.6?sc2/sw/63:.5)-toneC)*.02;if(pk>.25)toneP+=(pi/52-toneP)*.015;
    hue=(hue0+(toneC-.5)*110+(toneP-.5)*50+720)%360}
   if(isGL()){drawGL();lastBass=b;return}
@@ -555,7 +567,7 @@ function frame(){
   if(sty==='ring'){
     // Ring aus Strahlen
     for(let i=0;i<128;i++){
-      const k=i<64?i:127-i,v=l[k],a=i/128*Math.PI*2+tphase*.1,len=R*.15+v*R*1.2;
+      const k=i<64?i:127-i,v=spec[k],a=i/128*Math.PI*2+tphase*.1,len=R*.15+v*R*1.2;
       g.strokeStyle=`hsla(${(hue+k*3)%360},90%,${50+v*30}%,${.35+v*.65})`;g.lineWidth=Math.max(3,W/320);g.lineCap='round';
       g.beginPath();g.moveTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);g.lineTo(cx+Math.cos(a)*(R+len),cy+Math.sin(a)*(R+len));g.stroke();
     }
@@ -563,22 +575,22 @@ function frame(){
   }else if(sty==='nebel'){
     // Nebel: viele kleine, klar umrissene Lichtpunkte
     for(let i=0;i<48;i++){
-      const v=l[(i*4/3|0)%64],a=tphase*(.12+i*.009)+i*1.7,rad=Math.min(W,H)*(.012+v*.07);
+      const v=spec[(i*4/3|0)%64],a=tphase*(.12+i*.009)+i*1.7,rad=Math.min(W,H)*(.012+v*.07);
       const x=cx+Math.cos(a)*W*.36*Math.sin(i+tphase*.1),y=cy+Math.sin(a*1.1)*H*.36*Math.cos(i*.7+tphase*.08);
       const gr=g.createRadialGradient(x,y,0,x,y,rad);const c=`${(hue+i*8)%360},90%,62%`;
       gr.addColorStop(0,`hsla(${c},${.55+v*.45})`);gr.addColorStop(.7,`hsla(${c},${.4+v*.4})`);gr.addColorStop(1,`hsla(${c},0)`);
       g.fillStyle=gr;g.beginPath();g.arc(x,y,rad,0,7);g.fill();
     }
   }else if(sty==='stern'){
-    // Sternenflug
-    if(!stars){stars=[];for(let i=0;i<220;i++)stars.push({x:Math.random()*2-1,y:Math.random()*2-1,z:Math.random()})}
-    const tgt=au.paused?.0003:.0003+.0008+toneC*.0012;spStar+=(tgt-spStar)*.03;const sp=spStar;
+    // Sternenflug: jeder Stern gehoert zu einem Ton und leuchtet mit ihm
+    if(!stars){stars=[];for(let q=0;q<320;q++)stars.push({x:Math.random()*2-1,y:Math.random()*2-1,z:Math.random(),b:Math.random()})}
+    const sp0=.0002+.0008*act;
     for(const s of stars){
-      const pz=s.z;s.z-=sp;
-      if(s.z<=.02){s.x=Math.random()*2-1;s.y=Math.random()*2-1;s.z=1;continue}
-      const k=W*.55,x1=cx+s.x/s.z*k*.5,y1=cy+s.y/s.z*k*.5,x0=cx+s.x/pz*k*.5,y0=cy+s.y/pz*k*.5;
-      const br=1-s.z;g.strokeStyle=`hsla(${(hue+s.x*60+360)%360},80%,${60+br*30}%,${.3+br*.7})`;g.lineWidth=1+br*W/400*(1+b*2);g.lineCap='round';
-      g.beginPath();g.moveTo(x0,y0);g.lineTo(x1,y1);g.stroke();
+      const pz=s.z;s.z-=sp0;
+      if(s.z<=.02){s.x=Math.random()*2-1;s.y=Math.random()*2-1;s.z=1;s.b=Math.random();continue}
+      const v=sp(s.b),k=W*.55,x1=cx+s.x/s.z*k*.5,y1=cy+s.y/s.z*k*.5,x0=cx+s.x/pz*k*.5,y0=cy+s.y/pz*k*.5;
+      const br=1-s.z;g.strokeStyle=`hsla(${(hue+s.b*140)%360},85%,${55+v*35}%,${.1+br*.25+v*.65})`;g.lineWidth=1+br*W/500*(1+v*3)+v*W/300;g.lineCap='round';
+      g.beginPath();g.moveTo(x0,y0);g.lineTo(x1+.01,y1);g.stroke();
     }
   }else if(sty==='kreis'){
     // Kreis-Balken: fuenf Ringe, jeder fuer einen Frequenzbereich
@@ -586,44 +598,46 @@ function frame(){
     for(let j=0;j<rings;j++){
       const r0=R*(.35+j*.3),seg=48;
       for(let i=0;i<seg;i++){
-        const k=j*12+(i<seg/2?i:seg-1-i)%12,v=l[Math.min(63,k)],a=i/seg*Math.PI*2+tphase*(j%2?.12:-.12),len=R*.05+v*R*.3;
+        const k=j*12+(i<seg/2?i:seg-1-i)%12,v=spec[Math.min(63,k)],a=i/seg*Math.PI*2+tphase*(j%2?.12:-.12),len=R*.05+v*R*.3;
         g.strokeStyle=`hsla(${(hue+j*55+i*2)%360},90%,${50+v*30}%,${.5+v*.5})`;g.lineWidth=Math.max(3,W/300);g.lineCap='round';
         g.beginPath();g.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);g.lineTo(cx+Math.cos(a)*(r0+len),cy+Math.sin(a)*(r0+len));g.stroke();
       }
     }
   }else if(sty==='funken'){
-    // Funken
-    const n=Math.random()<.5*act?1:0;
-    for(let i=0;i<n&&sparks.length<320;i++)sparks.push({x:W*(.15+.7*toneP)+(Math.random()+Math.random()-1)*W*.14,y:H+10,vx:(Math.random()-.5)*.6,vy:-(.8+Math.random()*1.4)*(.3+.7*act),life:1,h:(hue+Math.random()*80)%360});
-    for(let i=sparks.length-1;i>=0;i--){
-      const p=sparks[i];p.x+=p.vx+Math.sin(p.y*.02+i)*.4;p.y+=p.vy;p.life-=.004;
-      if(p.life<=0||p.y<-10){sparks.splice(i,1);continue}
-      g.fillStyle=`hsla(${p.h},95%,${55+b*30}%,${p.life})`;g.beginPath();g.arc(p.x,p.y,Math.max(2,W/420)*(.6+p.life),0,7);g.fill();
+    // Funken: links tiefe, rechts hohe Toene; mehr Funken bei staerkerem Ton
+    for(let c=0;c<24;c++){
+      const fr=(c+.5)/24,v=sp(fr);
+      if(sparks.length<500&&Math.random()<v*.28)sparks.push({x:(fr+(Math.random()-.5)/24)*W,y:H+10,vx:(Math.random()-.5)*.5,vy:-(.9+Math.random()*1.3),life:1,v:v,h:(hue+fr*120)%360});
+    }
+    for(let q=sparks.length-1;q>=0;q--){
+      const p=sparks[q];p.x+=p.vx+Math.sin(p.y*.02+q)*.3;p.y+=p.vy;p.life-=.004;
+      if(p.life<=0||p.y<-10){sparks.splice(q,1);continue}
+      g.fillStyle=`hsla(${p.h},95%,${55+p.v*30}%,${p.life})`;g.beginPath();g.arc(p.x,p.y,Math.max(2,W/420)*(.6+p.v*1.4)*(.5+p.life*.5),0,7);g.fill();
     }
   }else if(sty==='seide'){
     // Seide: Faeden im langsamen Stroemungsfeld
     const N=1800,sc=W/1280;
     if(!silk){silk=[];for(let i=0;i<N;i++)silk.push({x:Math.random()*W,y:Math.random()*H,life:Math.random()*400})}
     const t=tphase,turb=1+toneC*.9,spd=(.04+.9*act)*sc,bend=(toneP-.5)*1.4;
-    const paths=[new Path2D(),new Path2D(),new Path2D()];
+    const paths=[];for(let q=0;q<9;q++)paths.push(new Path2D());
     for(let i=0;i<N;i++){
       const p=silk[i],u=p.x/W*6*turb,v=p.y/H*4*turb;
       const ang=Math.sin(u*1.1+t*.13+Math.sin(v*.9-t*.07)*1.5)*Math.PI+Math.cos(v*1.3-t*.1+Math.sin(u*.6+t*.05))*1.3+bend;
-      const nx=p.x+Math.cos(ang)*spd,ny=p.y+Math.sin(ang)*spd,pa=paths[i%3];
+      const lv=sp(p.x/W),nx=p.x+Math.cos(ang)*spd,ny=p.y+Math.sin(ang)*spd,pa=paths[(i%3)*3+(lv<.2?0:lv<.5?1:2)];
       pa.moveTo(p.x,p.y);pa.lineTo(nx,ny);p.x=nx;p.y=ny;
       if(--p.life<0||nx<-20||nx>W+20||ny<-20||ny>H+20){p.x=Math.random()*W;p.y=Math.random()*H;p.life=150+Math.random()*250}
     }
-    const al=.3+sL*.15;g.lineWidth=Math.max(1.3,W/700);g.lineCap='round';
-    for(let k=0;k<3;k++){g.strokeStyle=`hsla(${(hue+(k-1)*45+360)%360},80%,${58+sL*20}%,${al})`;g.stroke(paths[k])}
+    const als=[.1,.32,.75];g.lineWidth=Math.max(1.3,W/700);g.lineCap='round';
+    for(let k=0;k<3;k++)for(let bq=0;bq<3;bq++){g.strokeStyle=`hsla(${(hue+(k-1)*45+360)%360},80%,${55+bq*10}%,${als[bq]})`;g.stroke(paths[k*3+bq])}
   }else if(sty==='aurora'){
     // Aurora: weiche, wehende Lichtvorhaenge
     const t=tphase,step=10;
     for(let j=0;j<5;j++){
-      const h0=(hue+j*14+360)%360,base=H*(.18+.09*j),hgt=H*(.30+toneC*.2);
+      const bj=[[0,6],[6,14],[14,26],[26,42],[42,64]][j],vj=avg(spec,bj[0],bj[1]),h0=(hue+j*14+360)%360,base=H*(.18+.09*j),hgt=H*(.16+.34*vj);
       const top=x=>base+Math.sin(x/W*4.2+t*.18*(1+j*.25)+j*2)*H*.09+Math.sin(x/W*9-t*.13+j)*H*.03;
       const gr=g.createLinearGradient(0,base-H*.1,0,base+hgt+H*.1);
       gr.addColorStop(0,`hsla(${h0},85%,60%,0)`);gr.addColorStop(.35,`hsla(${h0},75%,52%,.9)`);gr.addColorStop(1,`hsla(${(h0+35)%360},70%,42%,0)`);
-      g.fillStyle=gr;g.globalAlpha=.06+sL*.03;
+      g.fillStyle=gr;g.globalAlpha=.03+.17*vj;
       g.beginPath();g.moveTo(0,top(0));
       for(let x=0;x<=W;x+=step)g.lineTo(x,top(x));
       for(let x=W;x>=0;x-=step)g.lineTo(x,top(x)+hgt*(.8+.2*Math.sin(x/W*6+t*.2+j)));
@@ -633,7 +647,7 @@ function frame(){
       for(let x=0;x<=W;x+=step*2){
         const a=Math.max(0,.012*Math.sin(x*.021+t*.35+j*1.7)*Math.sin(x*.007-t*.2));
         if(a<.002)continue;
-        const y0=top(x);g.strokeStyle=`hsla(${h0},70%,60%,${a*(1+sL)})`;
+        const y0=top(x);g.strokeStyle=`hsla(${h0},70%,60%,${a*(.3+4*vj)})`;
         g.beginPath();g.moveTo(x,y0);g.lineTo(x,y0+hgt*.8);g.stroke();
       }
     }
@@ -641,9 +655,9 @@ function frame(){
   }else{
     // Rosetten: duenne, langsam morphende Spirograph-Kurven
     const t=tphase,sz=Math.min(W,H)*.30;
-    g.lineWidth=Math.max(1.4,W/900);
+    g.lineWidth=Math.max(1.4,W/900)*(1+sLow*2.5);
     for(let k=0;k<4;k++){
-      const rr=.28+.1*Math.sin(t*.045+k*1.7),d=.55+.3*Math.sin(t*.06+k*2.3)+toneC*.45,ro=1-rr,ratio=ro/rr,rot=t*.04*(k%2?1:-1);
+      const rr=.28+.1*Math.sin(t*.045+k*1.7),d=.55+.3*Math.sin(t*.06+k*2.3)+sMid*.7,ro=1-rr,ratio=ro/rr,rot=t*.04*(k%2?1:-1);
       g.beginPath();
       const M=900,span=Math.PI*2*6;
       for(let i=0;i<=M;i++){
@@ -652,15 +666,16 @@ function frame(){
         const c=Math.cos(rot),sn=Math.sin(rot),xr=x*c-y*sn,yr=x*sn+y*c,sc=sz/(1+d*rr);
         i?g.lineTo(cx+xr*sc,cy+yr*sc):g.moveTo(cx+xr*sc,cy+yr*sc);
       }
-      g.strokeStyle=`hsla(${(hue+k*32)%360},80%,${60+sL*20}%,${.25+sL*.1})`;g.stroke();
+      g.strokeStyle=`hsla(${(hue+k*32)%360},80%,${60+sL*20}%,${.18+sHigh*.5+sLow*.2})`;g.stroke();
     }
   }
   lastBass=b;
 }
 const names=STY.map((x,i)=>'Stil '+(i+1)+' · '+x.n);
 if(!(mode>=0&&mode<STY.length))mode=1;
-function syncMode(){$('nMode').textContent=names[mode];layers();g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height)}
-$('nMode').onclick=()=>{do{mode=(mode+1)%STY.length}while(isGL()&&!initGL());ls.set('vmode2',String(mode));syncMode()};
+function syncMode(){$('nMode').textContent='◀ '+names[mode]+' ▶';layers();g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height)}
+function stepMode(d){do{mode=(mode+d+STY.length)%STY.length}while(isGL()&&!initGL());ls.set('vmode2',String(mode));syncMode()}
+$('nMode').onclick=e=>{const r=e.currentTarget.getBoundingClientRect();stepMode(e.detail===0?1:(e.clientX<r.left+r.width/2?-1:1))};
 let hideT=0;
 function pokeUi(){$('npui').classList.remove('hide');$('np').classList.remove('hideui');clearTimeout(hideT);hideT=setTimeout(()=>{if(!au.paused){$('npui').classList.add('hide');$('np').classList.add('hideui')}},6000)}
 ['mousemove','keydown','click','touchstart'].forEach(e=>$('np').addEventListener(e,pokeUi));
@@ -689,7 +704,8 @@ setInterval(()=>{
     edge(4,prev);edge(5,next); // LB / RB
     edge(9,toggle); // Menü
     if($('np').classList.contains('on')){
-      edge(2,()=>$('nMode').click()); // X
+      edge(2,()=>stepMode(1)); // X
+      edge(14,()=>stepMode(-1));edge(15,()=>stepMode(1)); // Steuerkreuz links/rechts
       if(p.buttons.some(b=>b&&b.pressed)||p.axes.some(a=>Math.abs(a)>.5))pokeUi();
     }
   }
