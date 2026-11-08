@@ -248,9 +248,10 @@ async function playAt(i,pos){
   try{
     if(!pos&&spare.dataset.id===it.id&&spare.getAttribute('src')&&!spare.error){
       // der Titel wurde schon im Hintergrund geladen: nahtlos wechseln
-      const old=au;au=spare;spare=old;old.pause();au.volume=old.volume;au.currentTime=0;
-      old.removeAttribute('src');old.dataset.id='';old.load();
-      await au.play();
+      const old=au;au=spare;spare=old;old.pause();au.volume=old.volume;
+      if(au.paused){au.currentTime=0;await au.play()}
+      crossFor=null;
+      setTimeout(()=>{if(spare===old){old.removeAttribute('src');old.dataset.id='';old.load()}},300);
     }else{
       const u=await dlUrl(it.id);if(my!==playToken)return;
       if(useCors)au.crossOrigin='anonymous';else au.removeAttribute('crossorigin');
@@ -275,11 +276,20 @@ on('error',()=>{
   if(useCors&&au.src){useCors=false;analyserOk=false;const t=au.currentTime;au.removeAttribute('crossorigin');const s=au.src;au.src=s;au.currentTime=t;au.play().catch(()=>{})}
   else $('barSub').textContent='Wiedergabefehler';
 });
+let lat=.25,crossFor=null;
 setInterval(()=>{
-  // kurz vor dem Ende nahtlos auf den schon geladenen naechsten Titel wechseln
+  // Der naechste Titel wird so frueh gestartet, wie sein Start dauert (gemessen), damit kein Loch entsteht
   const n=queue[qi+1];
-  if(n&&!au.paused&&au.duration&&au.duration-au.currentTime<.15&&spare.dataset.id===n.id&&spare.readyState>=3&&!spare.error)playAt(qi+1);
-},40);
+  if(!n||au.paused||!au.duration||crossFor===n.id)return;
+  if(au.duration-au.currentTime<lat+.06&&spare.dataset.id===n.id&&spare.readyState>=3&&!spare.error){
+    crossFor=n.id;const nx=spare,t0=performance.now();nx.volume=au.volume;nx.currentTime=0;
+    nx.addEventListener('playing',()=>{
+      lat=Math.min(1.2,Math.max(.08,lat*.5+(performance.now()-t0)/1000*.5));
+      if(queue[qi+1]===n&&spare===nx)playAt(qi+1);
+    },{once:true});
+    nx.play().catch(()=>{crossFor=null});
+  }
+},20);
 on('ended',()=>{if(qi+1<queue.length)playAt(qi+1);else{syncPlay()}});
 ['play','pause','playing'].forEach(e=>on(e,syncPlay));
 function syncPlay(){const s=au.paused?'▶':'⏸';$('bPlay').textContent=s;$('nPlay').textContent=s;if('mediaSession' in navigator)navigator.mediaSession.playbackState=au.paused?'paused':'playing'}
@@ -367,7 +377,7 @@ function setupAudio(){
   if(actx||!useCors)return;
   try{
     actx=new (window.AudioContext||window.webkitAudioContext)();
-    an=actx.createAnalyser();an.fftSize=1024;an.smoothingTimeConstant=.78;
+    an=actx.createAnalyser();an.fftSize=1024;an.smoothingTimeConstant=.4;
     for(const el of aud)actx.createMediaElementSource(el).connect(an);
     an.connect(actx.destination);
     freq=new Uint8Array(an.frequencyBinCount);wave=new Uint8Array(an.fftSize);analyserOk=true;
@@ -416,7 +426,7 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform vec2 uRes;uniform float uT,uF,uTone,uPitch,uLvl,uHue,uMode,uLow,uMid,uHigh;uniform sampler2D uSpec;
+uniform vec2 uRes;uniform float uT,uF,uTone,uPitch,uLvl,uHue,uMode,uLow,uMid,uHigh,uBeat;uniform sampler2D uSpec;
 float sp(float x){return texture2D(uSpec,vec2(clamp(x,0.,1.),.5)).r;}
 vec3 pal(float t){return .5+.5*cos(6.28318*(t+vec3(0.,.33,.67)+uHue));}
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -431,7 +441,7 @@ vec2 warp(vec2 p,float t,float amp){
 }
 void main(){
   vec2 uv=(gl_FragCoord.xy-.5*uRes)/min(uRes.x,uRes.y);
-  float t=uT*.12;float amp=.45+uLow*.5+uMid*.3;
+  float t=uT*.12;float amp=.45+uLow*.5+uMid*.3+uBeat*.35;
   vec3 col=vec3(0.);
   if(uMode<.5){
     vec2 p=warp(uv*2.2,t,amp);
@@ -467,7 +477,7 @@ void main(){
     col=pal(fc*.12+uv.y*.35+tl*.15)*(.55+.45*shape)*shape*1.1+pal(fc*.1+.5)*glow*(1.-shape)*.35+pal(uv.y*.2+tl*.1)*.05;
   }else if(uMode<4.5){
     // Fraktal: langsam wandernde Julia-Menge
-    float a=uT*.05+1.1+uLow*.6+uMid*.4;
+    float a=uT*.05+1.1+uLow*.6+uMid*.4+uBeat*.15;
     vec2 c=.76*vec2(cos(a),sin(a));
     float ra=t*.3;vec2 z=mat2(cos(ra),-sin(ra),sin(ra),cos(ra))*(uv*2.2*(1.-.15*uHigh));
     float n=0.;
@@ -478,7 +488,7 @@ void main(){
   }else if(uMode<5.5){
     // Moire: zwei wandernde Ringmuster
     vec2 c1=vec2(sin(t*2.1),cos(t*1.7))*.3,c2=vec2(cos(t*1.9+1.),sin(t*2.3))*.3;
-    float d1=length(uv-c1),d2=length(uv-c2),fr=46.+uLow*22.;
+    float d1=length(uv-c1),d2=length(uv-c2),fr=46.+uLow*22.+uBeat*8.;
     float m=sin(d1*fr-t*4.+uMid*3.)*sin(d2*fr+t*3.);
     col=pal(d1*.5+d2*.5+t*.2)*(.12+.88*smoothstep(-.1,.5,m))*(.55+.9*uHigh+.4*uMid);
   }else if(uMode<6.5){
@@ -487,11 +497,11 @@ void main(){
     for(int n=0;n<4;n++){float tt=t2*(1.-(3.5/float(n+1)));
       i2=p+vec2(cos(tt-i2.x)+sin(tt+i2.y),sin(tt-i2.y)+cos(tt+i2.x));
       c+=1./length(vec2(p.x/(sin(i2.x+tt)/inten),p.y/(cos(i2.y+tt)/inten)));}
-    c/=4.;c=1.17-pow(c,1.4);float w=pow(abs(c),8.)*(.5+1.4*uMid+.6*uLow);
+    c/=4.;c=1.17-pow(c,1.4);float w=pow(abs(c),8.)*(.5+1.4*uMid+.6*uLow+uBeat*.6);
     col=pal(.55+t*.1)*.10+pal(.6+t*.1+w*.3)*clamp(w*1.4,0.,1.)*.9+vec3(w*.15);
   }else{
     // Kamin: ruhige Flammen mit Glut
-    float x=uv.x/.9,y=uv.y+.5,hgt=.22+.55*sp((x+1.)*.5)+.03*sin(uF*.7);
+    float x=uv.x/.9,y=uv.y+.5,hgt=.22+.55*sp((x+1.)*.5)+.03*sin(uF*.7)+uBeat*.12;
     float n=fbm(vec2(x*2.4+uPitch*.8,y*1.5-uF*.8)),n2=fbm(vec2(x*5.+uF*.15,y*3.2-uF*1.5));
     float f=n*.7+n2*.3;
     float env=1.-pow(abs(x)/(.95-.45*y/hgt),2.);
@@ -501,7 +511,7 @@ void main(){
     float ember=pow(max(1.-y*2.2,0.),2.)*(.35+.4*noise(vec2(x*9.,uF*.5)));
     col+=vec3(.8,.22,.03)*ember*.8+vec3(.35,.08,.0)*.12*(1.-y);
   }
-  col*=.9+uLvl*.15;
+  col*=.9+uLvl*.15+uBeat*.25;
   gl_FragColor=vec4(col,1.);
 }`;
 function initGL(){
@@ -516,7 +526,7 @@ function initGL(){
     const tx=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tx);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
     const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
     const loc=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
-    for(const n of ['uRes','uT','uF','uTone','uPitch','uLvl','uHue','uMode','uLow','uMid','uHigh','uSpec'])glU[n]=gl.getUniformLocation(pr,n);
+    for(const n of ['uRes','uT','uF','uTone','uPitch','uLvl','uHue','uMode','uLow','uMid','uHigh','uBeat','uSpec'])glU[n]=gl.getUniformLocation(pr,n);
     glOk=true;
   }catch(e){glOk=false}
   return glOk;
@@ -526,7 +536,7 @@ function drawGL(){
   const w=Math.max(2,Math.round(innerWidth*.75)),h=Math.max(2,Math.round(innerHeight*.75));
   if(glc.width!==w||glc.height!==h){glc.width=w;glc.height=h}
   gl.viewport(0,0,w,h);
-  gl.uniform2f(glU.uRes,w,h);gl.uniform1f(glU.uT,tphase);gl.uniform1f(glU.uF,fireT);gl.uniform1f(glU.uTone,toneC);gl.uniform1f(glU.uPitch,toneP);gl.uniform1f(glU.uLvl,sL);gl.uniform1f(glU.uLow,sLow);gl.uniform1f(glU.uMid,sMid);gl.uniform1f(glU.uHigh,sHigh);gl.uniform1i(glU.uSpec,0);
+  gl.uniform2f(glU.uRes,w,h);gl.uniform1f(glU.uT,tphase);gl.uniform1f(glU.uF,fireT);gl.uniform1f(glU.uTone,toneC);gl.uniform1f(glU.uPitch,toneP);gl.uniform1f(glU.uLvl,sL);gl.uniform1f(glU.uLow,sLow);gl.uniform1f(glU.uMid,sMid);gl.uniform1f(glU.uHigh,sHigh);gl.uniform1f(glU.uBeat,beat);gl.uniform1i(glU.uSpec,0);
   {const u8=new Uint8Array(64);for(let q=0;q<64;q++)u8[q]=Math.round(spec[q]*255);gl.texImage2D(gl.TEXTURE_2D,0,gl.LUMINANCE,64,1,0,gl.LUMINANCE,gl.UNSIGNED_BYTE,u8)}
   gl.uniform1f(glU.uHue,hue/360);gl.uniform1f(glU.uMode,STY[mode].gl);
   gl.drawArrays(gl.TRIANGLES,0,3);
@@ -538,13 +548,24 @@ const STY=[{k:'cover',n:'Nur Cover'},{k:'ring',n:'Ring',f:.2},{k:'nebel',n:'Nebe
 const isGL=()=>STY[mode].gl!==undefined;
 let spStar=.0003;
 let stars=null,sparks=[],silk=null,sB=0,sM=0,sH=0,sL=0;
-const smv=new Float32Array(64),spec=new Float32Array(64);let sLow=0,sMid=0,sHigh=0;
+const smv=new Float32Array(64),spec=new Float32Array(64),raw2=new Float32Array(64);let sLow=0,sMid=0,sHigh=0,agc=.3,beat=0,bAvg=0,lastBeat=0,lastFx=0;const lPrev=new Float32Array(10);
 function updSpec(l){
+  // schnell hoch, sanft runter; Lautstaerke wird automatisch ausgeglichen
+  let mxr=0;
   for(let i=0;i<64;i++){
-    const t=l[i]*act;smv[i]+=(t-smv[i])*(t>smv[i]?.3:.1);
-    spec[i]=Math.min(1,smv[i]*1.4*(.8+2*Math.pow(i/63,.8)));
+    const t=l[i]*act;smv[i]+=(t-smv[i])*(t>smv[i]?.85:.14);
+    const r=smv[i]*(.8+2*Math.pow(i/63,.8));raw2[i]=r;if(r>mxr)mxr=r;
   }
-  sLow+=(avg(spec,0,8)-sLow)*.25;sMid+=(avg(spec,8,28)-sMid)*.25;sHigh+=(avg(spec,28,64)-sHigh)*.25;
+  agc+=(mxr-agc)*(mxr>agc?.15:.004);
+  const d=Math.max(.2,agc);
+  for(let i=0;i<64;i++)spec[i]=Math.min(1,raw2[i]/d*.95);
+  sLow+=(avg(spec,0,8)-sLow)*.5;sMid+=(avg(spec,8,28)-sMid)*.5;sHigh+=(avg(spec,28,64)-sHigh)*.5;
+  // Schlag-Erkenner: Bass springt ueber seinen Durchschnitt
+  let fx=0;for(let i=0;i<10;i++){const d=l[i]*act-lPrev[i];if(d>0)fx+=d;lPrev[i]=l[i]*act}
+  bAvg+=(fx-bAvg)*.05;lastFx=fx;
+  const nw=performance.now();
+  if(fx>bAvg*2.1+.08&&nw-lastBeat>260){beat=1;lastBeat=nw}
+  beat*=.9;
 }
 function sp(x){const f=Math.max(0,Math.min(1,x))*63,i=f|0,j=Math.min(63,i+1);return spec[i]+(spec[j]-spec[i])*(f-i)}
 function frame(){
@@ -563,7 +584,7 @@ function frame(){
   g.globalCompositeOperation='source-over';
   g.fillStyle='rgba(0,0,0,'+STY[mode].f+')';g.fillRect(0,0,W,H);
   g.globalCompositeOperation='lighter';
-  const R=Math.min(W,H)*.16*(1+.12*b);
+  const R=Math.min(W,H)*.16*(1+.12*b+.1*beat);
   if(sty==='ring'){
     // Ring aus Strahlen
     for(let i=0;i<128;i++){
@@ -575,8 +596,8 @@ function frame(){
   }else if(sty==='nebel'){
     // Nebel: viele kleine, klar umrissene Lichtpunkte
     for(let i=0;i<48;i++){
-      const v=spec[(i*4/3|0)%64],a=tphase*(.12+i*.009)+i*1.7,rad=Math.min(W,H)*(.012+v*.07);
-      const x=cx+Math.cos(a)*W*.36*Math.sin(i+tphase*.1),y=cy+Math.sin(a*1.1)*H*.36*Math.cos(i*.7+tphase*.08);
+      const v=spec[(i*4/3|0)%64],a=tphase*(.12+i*.009)+i*1.7,rad=Math.min(W,H)*(.012+v*.07)*(1+beat*.7);
+      const bj=1+beat*.12,x=cx+Math.cos(a)*W*.36*bj*Math.sin(i+tphase*.1),y=cy+Math.sin(a*1.1)*H*.36*bj*Math.cos(i*.7+tphase*.08);
       const gr=g.createRadialGradient(x,y,0,x,y,rad);const c=`${(hue+i*8)%360},90%,62%`;
       gr.addColorStop(0,`hsla(${c},${.55+v*.45})`);gr.addColorStop(.7,`hsla(${c},${.4+v*.4})`);gr.addColorStop(1,`hsla(${c},0)`);
       g.fillStyle=gr;g.beginPath();g.arc(x,y,rad,0,7);g.fill();
@@ -584,11 +605,11 @@ function frame(){
   }else if(sty==='stern'){
     // Sternenflug: jeder Stern gehoert zu einem Ton und leuchtet mit ihm
     if(!stars){stars=[];for(let q=0;q<320;q++)stars.push({x:Math.random()*2-1,y:Math.random()*2-1,z:Math.random(),b:Math.random()})}
-    const sp0=.0002+.0008*act;
+    const sp0=.0003+.0016*act+beat*.004;
     for(const s of stars){
       const pz=s.z;s.z-=sp0;
       if(s.z<=.02){s.x=Math.random()*2-1;s.y=Math.random()*2-1;s.z=1;s.b=Math.random();continue}
-      const v=sp(s.b),k=W*.55,x1=cx+s.x/s.z*k*.5,y1=cy+s.y/s.z*k*.5,x0=cx+s.x/pz*k*.5,y0=cy+s.y/pz*k*.5;
+      const v=Math.min(1,sp(s.b)+beat*.35),k=W*.55,x1=cx+s.x/s.z*k*.5,y1=cy+s.y/s.z*k*.5,x0=cx+s.x/pz*k*.5,y0=cy+s.y/pz*k*.5;
       const br=1-s.z;g.strokeStyle=`hsla(${(hue+s.b*140)%360},85%,${55+v*35}%,${.1+br*.25+v*.65})`;g.lineWidth=1+br*W/500*(1+v*3)+v*W/300;g.lineCap='round';
       g.beginPath();g.moveTo(x0,y0);g.lineTo(x1+.01,y1);g.stroke();
     }
@@ -598,7 +619,7 @@ function frame(){
     for(let j=0;j<rings;j++){
       const r0=R*(.35+j*.3),seg=48;
       for(let i=0;i<seg;i++){
-        const k=j*12+(i<seg/2?i:seg-1-i)%12,v=spec[Math.min(63,k)],a=i/seg*Math.PI*2+tphase*(j%2?.12:-.12),len=R*.05+v*R*.3;
+        const k=j*12+(i<seg/2?i:seg-1-i)%12,v=spec[Math.min(63,k)],a=i/seg*Math.PI*2+tphase*(j%2?.12:-.12),len=R*.05+v*R*.3+beat*R*.08;
         g.strokeStyle=`hsla(${(hue+j*55+i*2)%360},90%,${50+v*30}%,${.5+v*.5})`;g.lineWidth=Math.max(3,W/300);g.lineCap='round';
         g.beginPath();g.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);g.lineTo(cx+Math.cos(a)*(r0+len),cy+Math.sin(a)*(r0+len));g.stroke();
       }
@@ -607,7 +628,7 @@ function frame(){
     // Funken: links tiefe, rechts hohe Toene; mehr Funken bei staerkerem Ton
     for(let c=0;c<24;c++){
       const fr=(c+.5)/24,v=sp(fr);
-      if(sparks.length<500&&Math.random()<v*.28)sparks.push({x:(fr+(Math.random()-.5)/24)*W,y:H+10,vx:(Math.random()-.5)*.5,vy:-(.9+Math.random()*1.3),life:1,v:v,h:(hue+fr*120)%360});
+      if(sparks.length<500&&Math.random()<v*.28*(1+beat*1.5))sparks.push({x:(fr+(Math.random()-.5)/24)*W,y:H+10,vx:(Math.random()-.5)*.5,vy:-(.9+Math.random()*1.3),life:1,v:v,h:(hue+fr*120)%360});
     }
     for(let q=sparks.length-1;q>=0;q--){
       const p=sparks[q];p.x+=p.vx+Math.sin(p.y*.02+q)*.3;p.y+=p.vy;p.life-=.004;
@@ -627,7 +648,7 @@ function frame(){
       pa.moveTo(p.x,p.y);pa.lineTo(nx,ny);p.x=nx;p.y=ny;
       if(--p.life<0||nx<-20||nx>W+20||ny<-20||ny>H+20){p.x=Math.random()*W;p.y=Math.random()*H;p.life=150+Math.random()*250}
     }
-    const als=[.1,.32,.75];g.lineWidth=Math.max(1.3,W/700);g.lineCap='round';
+    const als=[.1,.32,.75];g.lineWidth=Math.max(1.3,W/700)*(1+beat*.8);g.lineCap='round';
     for(let k=0;k<3;k++)for(let bq=0;bq<3;bq++){g.strokeStyle=`hsla(${(hue+(k-1)*45+360)%360},80%,${55+bq*10}%,${als[bq]})`;g.stroke(paths[k*3+bq])}
   }else if(sty==='aurora'){
     // Aurora: weiche, wehende Lichtvorhaenge
@@ -637,7 +658,7 @@ function frame(){
       const top=x=>base+Math.sin(x/W*4.2+t*.18*(1+j*.25)+j*2)*H*.09+Math.sin(x/W*9-t*.13+j)*H*.03;
       const gr=g.createLinearGradient(0,base-H*.1,0,base+hgt+H*.1);
       gr.addColorStop(0,`hsla(${h0},85%,60%,0)`);gr.addColorStop(.35,`hsla(${h0},75%,52%,.9)`);gr.addColorStop(1,`hsla(${(h0+35)%360},70%,42%,0)`);
-      g.fillStyle=gr;g.globalAlpha=.03+.17*vj;
+      g.fillStyle=gr;g.globalAlpha=(.03+.17*vj)*(1+beat*.6);
       g.beginPath();g.moveTo(0,top(0));
       for(let x=0;x<=W;x+=step)g.lineTo(x,top(x));
       for(let x=W;x>=0;x-=step)g.lineTo(x,top(x)+hgt*(.8+.2*Math.sin(x/W*6+t*.2+j)));
@@ -657,7 +678,7 @@ function frame(){
     const t=tphase,sz=Math.min(W,H)*.30;
     g.lineWidth=Math.max(1.4,W/900)*(1+sLow*2.5);
     for(let k=0;k<4;k++){
-      const rr=.28+.1*Math.sin(t*.045+k*1.7),d=.55+.3*Math.sin(t*.06+k*2.3)+sMid*.7,ro=1-rr,ratio=ro/rr,rot=t*.04*(k%2?1:-1);
+      const rr=.28+.1*Math.sin(t*.045+k*1.7),d=.55+.3*Math.sin(t*.06+k*2.3)+sMid*.7+beat*.3,ro=1-rr,ratio=ro/rr,rot=t*.04*(k%2?1:-1);
       g.beginPath();
       const M=900,span=Math.PI*2*6;
       for(let i=0;i<=M;i++){
